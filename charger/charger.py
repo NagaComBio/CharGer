@@ -31,6 +31,7 @@ from collections import OrderedDict as OD
 import gzip
 import json
 import pdb
+import traceback
 
 class charger(object):
 	''' Example usage:
@@ -298,6 +299,8 @@ class charger(object):
 			except Exception as E:
 				print( "CharGer::readVCF - something went wrong with this variant record:\n\t" )
 				print( record )
+				print( E )
+				print( traceback.format_exc())
 		totalVars = len( self.userVariants ) + failedFilter + failedAF + failedMT
 		print(  "Skipping: " + str( failedFilter ) + " for filters and " + \
 				str( failedAF ) + " for AF and " + \
@@ -351,6 +354,15 @@ class charger(object):
 				siftStuff = self.getSIFT( values )
 				polyPhenStuff = self.getPolyPhen( values )
 				csq_terms = self.getConsequence( values )
+				fathmm_list = self.get_dbNSFP( values , "FATHMM_pred")
+				lrt_list = self.get_dbNSFP( values , "LRT_pred")
+				m_assessor_list = self.get_dbNSFP( values , "MutationAssessor_pred")
+				m_taster_list = self.get_dbNSFP( values , "MutationTaster_pred")
+				ada_float = self.getFloat(values, "ada_score")
+				rf_float = self.getFloat(values, "rf_score")
+				cadd_float = self.getFloat(values, "CADD_phred")
+				gerp_rs_float = self.getFloat(values, "GERP++_RS")
+
 				vcv = vepconsequencevariant( \
 					chromosome = var.chromosome , \
 					start = var.start , \
@@ -381,10 +393,19 @@ class charger(object):
 					totalExons = exons[1] , \
 					intron = introns[0] , \
 					totalIntrons = introns[1] , \
+					genesplicer = self.getVCFKeyIndex( values, "GeneSplicer"), \
+					ada_score = ada_float, \
+					rf_score = rf_float, \
+					cadd_phred = cadd_float, \
+					fathmm = fathmm_list, \
+					gerp_rs = gerp_rs_float, \
+					lrt = lrt_list, \
+					m_assessor = m_assessor_list, \
+					m_taster = m_taster_list \
 				)
 				var.vepVariant.consequences.append( vcv )
 			self.getMostSevereConsequence( var )
-			# adding support for VEP releases ≥ 90, which contain gnomAD frequencies by default.
+			# adding support for VEP releases  90, which contain gnomAD frequencies by default.
 			# will proritize gnomAD AF over ExAC and 1Kg, when possible
 			hasAF = self.getGnomAD_MAF ( values , var )
 			hasAF = self.getExAC_MAF( values , var ) # if gnomAD MAF not there, take ExAC
@@ -469,10 +490,24 @@ class charger(object):
 		if consequence_terms:
 			csq_terms = self.getVCFKeyIndex( values , "Consequence" ).split( "&" )
 		return csq_terms
+
+	def get_dbNSFP( self, values, tool ):
+		dbNSFPstuff = []
+		if self.getVCFKeyIndex(values, tool):
+			dbNSFPstuff = self.getVCFKeyIndex(values, tool).split( "&")
+		return dbNSFPstuff
+
+	def getFloat( self, values, tool ):
+		value = self.getVCFKeyIndex( values, tool )
+		try:
+			value = float(value)
+		except ValueError:
+			value = None
+		return value
 	
 	# added function to parse gnomAD AF from VEP annotation
 	def getGnomAD_MAF( self , values , var ):
-		#if the .vcf does not have AF, then check for gnomAD_AF (annotated with VEP releases ≥ 90 )
+		#if the .vcf does not have AF, then check for gnomAD_AF (annotated with VEP releases 90 )
 		if ( var.alleleFrequency is None ): # fixed (refer to pull request #28)
 			if "gnomAD_AF" in self.vcfKeyIndex:
 				gmaf = self.getVCFKeyIndex( values , "gnomAD_AF" )
@@ -482,10 +517,15 @@ class charger(object):
 				return False
 			if gmaf is not None:
 				if len(gmaf)==0:
-					return False
+					#return False
+					var.alleleFrequency = 0.0
+					return True
 				if len(gmaf)>0 and VEP_version==90:
 					var.alleleFrequency = gmaf
 					return True
+			else:
+				var.alleleFrequency = 0.0
+				return True
 		return False
 
 	def getExAC_MAF( self , values , var ):
@@ -1492,6 +1532,13 @@ class charger(object):
 		callImpact = "high"
 		fracMaxEntScan = 0.8
 		callGeneSplicer = ""
+		calldbscSNV = 0.6
+		callGerp_RS = 2
+		callFATHMM = "D"
+		callCADD = 20
+		callLRT  = "D"
+		callMtaster = ['A', 'D']
+		callMassessor = ['H', 'M']
 		nFound = 0
 		for var in self.userVariants:
 			case = []
@@ -1550,6 +1597,30 @@ class charger(object):
 									case.append( "GeneSplicer:" \
 										+ str( vcVar.genesplicer ) )
 									evidence += 1
+							if vcVar.ada_score > calldbscSNV or vcVar.rf_score > calldbscSNV:
+								case.append("dbscSNV:" \
+									+ str(vcVar.ada_score) + " " \
+									+ str(vcVar.rf_score))
+								evidence += 1
+							if vcVar.gerp_rs >= callGerp_RS:
+								case.append("GERP:" + str(vcVar.gerp_rs))
+								evidence += 1
+							if callFATHMM in vcVar.fathmm:
+								case.append("FATHMM: " + str(vcVar.fathmm))
+								evidence += 1
+							if vcVar.cadd_phred >= callCADD:
+								case.append("CADD: " + str(vcVar.cadd_phred))
+								evidence += 1
+							if callLRT in vcVar.lrt:
+								case.append("LRT pred: " + str(vcVar.lrt))
+								evidence += 1
+							if callMtaster in vcVar.m_taster:
+								case.append("MutationTaster: "+ str(vcVar.m_taster))
+								evidence += 1
+							if callMassessor in vcVar.m_assessor:
+								case.append("MutationAssessor" + str(vcVar.m_assessor))
+								evidence += 1
+
 							if evidence >= minimumEvidence:
 								var.PP3 = True
 								nFound += 1
