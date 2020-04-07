@@ -836,9 +836,9 @@ class charger(object):
 				# sample name in RSEM: TCGA-OR-A5J1-01A-11R-A29S-07
 				# sample name in MAF: TCGA-H4-A2HQ
 				for idx, sample in enumerate(samples):
-					sample_s = sample.split( "-" )
-					sample_only = "-".join(sample_s[0:3])
-					samples[idx] = sample_only
+					#sample_s = sample.split( "-" )
+					#sample_only = "-".join(sample_s[0:3])
+					samples[idx] = sample
 					
 				for line in inFile:
 					fields = line.split( "\t" )		
@@ -1318,16 +1318,27 @@ class charger(object):
 	def matchClinVar( self , userVariants , clinvarVariants ):
 		print( "matchClinVar!" )
 		matched = 0
+
+		clinvar_dict = {}
+		for uid, cvar in clinvarVariants.items():
+			c_key = '_'.join([cvar.chromosome, str(cvar.start), cvar.reference, cvar.alternate])
+			clinvar_dict[c_key] = uid
+
 		for var in userVariants:
-			for uid in clinvarVariants:
-				cvar = clinvarVariants[uid]
+			u_key = '_'.join([var.chromosome, str(var.start), var.reference, var.alternate])
+			if u_key in clinvar_dict:
+				cvar = clinvarVariants[clinvar_dict[u_key]]
+
+#		for var in userVariants:
+#			for uid in clinvarVariants:
+#				cvar = clinvarVariants[uid]
 				if var.sameGenomicVariant( cvar ):
 					matched += 1
 					var.clinical = cvar.clinical
 					cvar.fillMissingInfo( var )
 					var.fillMissingInfo( cvar )
 					var.clinvarVariant = cvar
-					break
+#					break
 		print( "Matched " + str( matched ) + " ClinVar entries to user variants" )
 		return userVariants
 
@@ -1440,6 +1451,7 @@ class charger(object):
 		clustersFile = kwargs.get( 'hotspot3d' , "" )
 		if clustersFile:
 			print "Reading HotSpot3D clusters file: " + clustersFile
+			hotspot_dict = {}
 			with open( clustersFile , 'r' ) as clustersFH:
 				clustersFH.next()
 				for line in clustersFH:
@@ -1452,17 +1464,25 @@ class charger(object):
 						stop = fields[9]
 						reference = fields[10]
 						alternate = fields[11]
-						hotspot3dVar = mafvariant( 
-							chromosome = chromosome , 
-							start = start , 
-							stop = stop , 
-							reference = reference , 
-							alternate = alternate 
-							)
-						for var in self.userVariants:
-							if hotspot3dVar.sameGenomicVariant( var ):
-								var.PM1 = True
-								var.addSummary( "PM1(HotSpot3D: somatic hotspot among 19 TCGA cancer types with " + str( recurrence ) + "samples)" )
+						hot_key = '_'.join([chromosome, str(start), str(stop), reference, alternate])
+						hotspot_dict[hot_key] = recurrence
+
+			for var in self.userVariants:
+				u_key = '_'.join([var.chromosome, str(var.start), str(var.stop), reference, alternate])
+				if u_key in hotspot_dict:
+					var.PM1 = True
+					var.addSummary( "PM1(HotSpot3D: somatic hotspot among 19 TCGA cancer types with " + str( hotspot_dict[u_key] ) + "samples)" )
+#						hotspot3dVar = mafvariant( 
+#							chromosome = chromosome , 
+#							start = start , 
+#							stop = stop , 
+#							reference = reference , 
+#							alternate = alternate 
+#							)
+#						for var in self.userVariants:
+#							if hotspot3dVar.sameGenomicVariant( var ):
+#								var.PM1 = True
+#								var.addSummary( "PM1(HotSpot3D: somatic hotspot among 19 TCGA cancer types with " + str( recurrence ) + "samples)" )
 		else:
 			print "CharGer::PM1 Warning: clustersFile is not supplied. PM1 was not executed. "
 							#break #maybe don't break if possible redundant genomic variants
