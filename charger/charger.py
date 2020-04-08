@@ -166,7 +166,7 @@ class charger(object):
 		if coSegregateFile:
 			self.readCoSegregate( coSegregateFile )
 		if expressionFile:
-			self.readExpression( expressionFile )
+			self.readExpression( expressionFile , self.sample)
 		else: 
 			print "No expression file uploaded. CharGer will allow all passed truncations without expression data in PVS1."
 		for var in self.userVariants:
@@ -227,6 +227,7 @@ class charger(object):
 		failedFilter = 0
 		failedAF = 0
 		failedMT = 0
+		self.sample = inFile.samples[0].split("_")[-1]
 		[ vepDone , exacDone , clinvarDone ] = self.readMetaData( metadata , inFile.infos , vepInfo )
 		for record in inFile:
 			try:
@@ -280,6 +281,7 @@ class charger(object):
 
 					var.vcfInfo = vcfInfo
 					var.disease = charger.allDiseases
+					var.sample = self.sample
 
 					hasAF = False
 					hasAF = self.getAF( info , var , alti )
@@ -823,7 +825,8 @@ class charger(object):
 			pass
 		return thing
 			
-	def readExpression( self , inputFile ): # expect sample(col)-gene(row) matrixes
+	def readExpression( self , inputFile, pid ): # expect sample(col)-gene(row) matrixes
+		pid_idx = None
 		try:
 			fileNames = glob.glob(inputFile + "*")
 			for fileName in fileNames:
@@ -839,17 +842,23 @@ class charger(object):
 					#sample_s = sample.split( "-" )
 					#sample_only = "-".join(sample_s[0:3])
 					samples[idx] = sample
+					if sample == pid:
+						pid_idx = idx
 					
-				for line in inFile:
-					fields = line.split( "\t" )		
-					gene = fields[0] 
-					gene_exp = [ self.toFloat(x) for x in fields[1:]] # manage potential NA strings that may cause errors
-					gene_exp_p = (stats.rankdata(gene_exp, 'min')-1)/len(gene_exp) # convert to percentile
-					for i in range(1,len(gene_exp_p)):
-						self.userExpression[samples[i+1]][gene] = gene_exp_p[i]
+				if pid_idx is not None:
+					for line in inFile:
+						fields = line.split( "\t" )		
+						gene = fields[0] 
+						#gene_exp = [ self.toFloat(x) for x in fields[1:]] # manage potential NA strings that may cause errors
+						#gene_exp_p = (stats.rankdata(gene_exp, 'min')-1)/len(gene_exp) # convert to percentile
+						#for i in range(1,len(gene_exp_p)):
+						for i in range(1, len(fields[1:])):
+							#self.userExpression[samples[i+1]][gene] = gene_exp_p[i]
+							self.userExpression[samples[pid_idx+1]][gene] = self.toFloat(fields[pid_idx])
 
-		except:
+		except Exception as e:
 			print "CharGer::readExpression Error: bad expression file"
+			print(e)
 
 	def readModesGeneList( self , inputFile , **kwargs ): # gene list formatted "gene", "disease", "mode of inheritance"
 		print( "CharGer::readModesGeneList" )
@@ -1400,7 +1409,7 @@ class charger(object):
 		print "- truncations in genes where LOF is a known mechanism of the disease"
 		print "- require the mode of inheritance to be dominant (assuming heterzygosity) and co-occurence with reduced gene expression"
 		print "- run concurrently with PSC1, PMC1, PM4, PPC1, and PPC2 - "
-		self.runIndelModules()
+		self.runIndelModules(expressionThreshold)
 		
 
 ##### Strong #####
@@ -1665,7 +1674,7 @@ class charger(object):
 		print "- protein length changes due to inframe indels or nonstop variant when no susceptibility genes given - "
 
 ### helper functions of evidence levels ###
-	def runIndelModules( self ):
+	def runIndelModules( self, expressionThreshold = 0.2):
 		maf_truncations = ["Frame_Shift_Del","Frame_Shift_Ins","Nonsense_Mutation","Splice_Site"] #,"Nonstop_Mutation"
 		vep_truncations = ["transcript_ablation","splice_acceptor_variant","splice_donor_variant","stop_gained",\
 							"frameshift_variant","start_lost"]
@@ -1679,6 +1688,10 @@ class charger(object):
 			varClass = var.variantClass
 			varGene = var.gene
 			varVEPClass = ""
+			
+			if var.sample in self.userExpression:
+				print(self.userExpression[var.sample][var.gene])
+
 			if var.vepVariant:
 				varVEPClass = var.vepVariant.mostSevereConsequence
 			altPeptide = var.alternatePeptide
@@ -1694,7 +1707,7 @@ class charger(object):
 							if charger.DOMINANT in self.inheritanceGeneList[varGene][varDisease].lower() \
 							or charger.DOMINANT in self.inheritanceGeneList[varGene][charger.allDiseases].lower():
 								var.PVS1 = True # if call is true then check expression effect
-								if self.userExpression: # consider expression data only if the user has supplied an expression matrix
+								if var.sample in self.userExpression: # consider expression data only if the user has supplied an expression matrix
 									varSample = var.sample
 									if self.userExpression[varSample][varGene] >= expressionThreshold:
 										var.PVS1 = False
