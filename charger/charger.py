@@ -724,8 +724,11 @@ class charger(object):
 						rankMostSevere = rank
 						mostSevereCons = term
 					elif rank == rankMostSevere:
-						if cons.canonical:
+						if cons.canonical and not mostSevere.canonical:
 							mostSevere = cons
+						elif cons.canonical and mostSevere.canonical:
+							if cons.geneSymbolSource == "HGNC" and mostSever.geneSymbolSource != "HGNC":
+								mostSevere = cons
 			if mostSevere:
 				#print( "setting MOST SEVERE CONSEQUENCE" )
 				var.gene = mostSevere.gene
